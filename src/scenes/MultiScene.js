@@ -3,9 +3,9 @@ import { drawGold, drawRock, drawDiamond, drawBag } from '../draw.js'
 
 // Anchor positions per player count
 const ANCHOR_SETS = {
-  1: [{ x: 400, y: 108 }],
-  2: [{ x: 220, y: 108 }, { x: 580, y: 108 }],
-  3: [{ x: 150, y: 108 }, { x: 400, y: 108 }, { x: 650, y: 108 }],
+  1: [{ x: 500, y: 108 }],
+  2: [{ x: 250, y: 108 }, { x: 750, y: 108 }],
+  3: [{ x: 167, y: 108 }, { x: 500, y: 108 }, { x: 833, y: 108 }],
 }
 
 const ROPE_COLORS  = [0xD47000, 0x0055CC, 0x007700]

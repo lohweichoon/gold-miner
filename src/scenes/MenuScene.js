@@ -20,7 +20,7 @@ export default class MenuScene extends Phaser.Scene {
     g.fillCircle(W - 60, 50, 44)
 
     // Clouds
-    for (const [cx, cy, cr] of [[100, 50, 30], [300, 35, 24], [530, 55, 28], [730, 38, 22]]) {
+    for (const [cx, cy, cr] of [[100, 50, 30], [300, 35, 24], [530, 55, 28], [730, 38, 22], [880, 52, 26]]) {
       g.fillStyle(0xFFFFFF, 1)
       g.fillCircle(cx, cy, cr)
       g.fillCircle(cx + cr * 0.55, cy + 4, cr * 0.72)

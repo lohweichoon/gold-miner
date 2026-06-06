@@ -35,7 +35,7 @@ const BAG_POOL = [100, 150, 200, 250, 300, 100, 150, 200, -50, -80]
 function buildItems() {
   return ITEM_TEMPLATES.map(t => ({
     ...t,
-    x: t.rx * 800,
+    x: t.rx * 1000,
     y: 145 + 20 + t.ry * 340,
     active: true,
   }))
