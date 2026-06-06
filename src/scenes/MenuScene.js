@@ -62,11 +62,11 @@ export default class MenuScene extends Phaser.Scene {
       stroke: '#336600', strokeThickness: 4,
     }).setOrigin(0.5)
 
-    // ── Play button (simple filled rectangle — confirmed working approach) ──
-    const btn = this.add.rectangle(W / 2, 296, 230, 62, 0xFF8800)
+    // ── Play button ──
+    const btn = this.add.rectangle(W / 2, 248, 230, 60, 0xFF8800)
       .setInteractive({ useHandCursor: true })
 
-    this.add.text(W / 2, 296, '开始游戏', {
+    this.add.text(W / 2, 248, '开始游戏', {
       fontSize: '30px', color: '#FFFFFF', fontStyle: 'bold',
       stroke: '#7A3A00', strokeThickness: 4,
     }).setOrigin(0.5)
@@ -74,17 +74,16 @@ export default class MenuScene extends Phaser.Scene {
     btn.on('pointerover', () => btn.setFillStyle(0xFFAA00))
     btn.on('pointerout',  () => btn.setFillStyle(0xFF8800))
     btn.on('pointerdown', () => {
-      console.log('[GoldMiner] button clicked → starting GameScene')
       this.scene.start('GameScene', { level: 1 })
     })
 
     // ── Multiplayer button ──
-    const multiBtn = this.add.rectangle(W / 2, 370, 230, 62, 0x3388CC)
+    const multiBtn = this.add.rectangle(W / 2, 322, 230, 60, 0x3388CC)
       .setInteractive({ useHandCursor: true })
 
-    this.add.text(W / 2, 370, '多人游戏', {
+    this.add.text(W / 2, 322, '多人游戏', {
       fontSize: '30px', color: '#FFFFFF', fontStyle: 'bold',
-      stroke: '#00224466', strokeThickness: 4,
+      stroke: '#002244', strokeThickness: 4,
     }).setOrigin(0.5)
 
     multiBtn.on('pointerover', () => multiBtn.setFillStyle(0x55AAEE))
@@ -95,12 +94,12 @@ export default class MenuScene extends Phaser.Scene {
     })
 
     // Instructions
-    this.add.text(W / 2, 446, '点击屏幕  或  按空格键  发射钩子', {
-      fontSize: '17px', color: '#FFFFFF',
+    this.add.text(W / 2, 393, '点击屏幕  或  按空格键  发射钩子', {
+      fontSize: '16px', color: '#FFFFFF',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5)
-    this.add.text(W / 2, 470, '抢在时间用完前达到目标金额！', {
-      fontSize: '15px', color: '#FFE000',
+    this.add.text(W / 2, 416, '抢在时间用完前达到目标金额！', {
+      fontSize: '14px', color: '#FFE000',
       stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5)
 
@@ -109,7 +108,7 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   drawLegend(W, H) {
-    const y = H - 38
+    const y = H - 28
     const items = [
       { draw: (g, x) => { g.fillStyle(0xFFAA00,1); g.lineStyle(2,0x7A4400,1); g.fillCircle(x,y,10); g.strokeCircle(x,y,10) }, label: '金块', color: '#FFE000' },
       { draw: (g, x) => { g.fillStyle(0x66BBFF,1); g.lineStyle(2,0x2255BB,1); g.fillCircle(x,y,10); g.strokeCircle(x,y,10) }, label: '钻石', color: '#AADDFF' },
