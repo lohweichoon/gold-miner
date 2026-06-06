@@ -1,0 +1,505 @@
+import Phaser from 'phaser'
+import { drawGold, drawRock, drawDiamond, drawBag } from '../draw.js'
+
+const ANCHORS = [
+  { x: 150, y: 108 },
+  { x: 400, y: 108 },
+  { x: 650, y: 108 },
+]
+
+const ROPE_COLORS = [0xD47000, 0x0055CC, 0x007700]
+const NAME_COLORS = ['#FF9900', '#44AAFF', '#55DD55']
+
+const SWING_SPEED = 1.4
+const EXTEND_SPEED = 320
+const RETRACT_SPEED = 220
+const MAX_ANGLE = 1.22
+const MIN_LENGTH = 55
+const MAX_LENGTH = 480
+
+export default class MultiScene extends Phaser.Scene {
+  constructor() { super('MultiScene') }
+
+  init(data) {
+    this.socket = data.socket
+    this.myPlayerId = data.myPlayerId
+    this.players = data.players   // [{id, name, score}]
+    this.itemDefs = data.items    // from server, with x/y already resolved
+    this.timeLeft = data.timeLeft
+  }
+
+  create() {
+    const W = this.scale.width
+    const H = this.scale.height
+    this.W = W
+    this.H = H
+    this.GROUND_Y = 145
+
+    // ── My hook local state ──
+    this.myHook = {
+      angle: 0,
+      dir: 1,
+      length: MIN_LENGTH,
+      state: 'SWINGING',   // SWINGING | EXTENDING | RETRACTING | GRAB_PENDING
+      hookedItemId: null,
+    }
+
+    // ── Remote hook cache: { [playerId]: { angle, length, state } } ──
+    this.remoteHooks = {}
+
+    // ── Scores ──
+    this.scores = {}
+    for (const p of this.players) this.scores[p.id] = p.score
+
+    // ── Scene objects ──
+    this.drawBackground()
+    this.itemGfxMap = this.createItems(this.itemDefs)
+    this.bagLabelMap = this.createBagLabels(this.itemDefs)
+    this.drawMiners()
+
+    this.hookGfx = this.add.graphics().setDepth(5)
+
+    this.scoreTexts = {}
+    this.createUI()
+
+    // ── Socket events ──
+    this._setupSocketEvents()
+
+    // ── Hook sync (send every 50ms) ──
+    this.time.addEvent({
+      delay: 50,
+      callback: this._sendHookUpdate,
+      callbackScope: this,
+      loop: true,
+    })
+
+    // ── Input ──
+    this.input.on('pointerdown', this._onShoot, this)
+    this.input.keyboard?.on('keydown-SPACE', this._onShoot, this)
+  }
+
+  // ── Background ───────────────────────────────────────────────────
+  drawBackground() {
+    const { W, H, GROUND_Y } = this
+    const g = this.add.graphics()
+
+    g.fillStyle(0x44AADD, 1)
+    g.fillRect(0, 0, W, GROUND_Y)
+
+    g.fillStyle(0xFFEE33, 1)
+    g.fillCircle(W - 55, 42, 26)
+    g.fillStyle(0xFFFF88, 0.5)
+    g.fillCircle(W - 55, 42, 36)
+
+    for (const [cx, cy, cr] of [[110, 38, 28], [290, 22, 22], [520, 42, 30], [690, 26, 20]]) {
+      g.fillStyle(0xFFFFFF, 1)
+      g.fillCircle(cx, cy, cr)
+      g.fillCircle(cx + cr * 0.55, cy + 4, cr * 0.72)
+      g.fillCircle(cx - cr * 0.50, cy + 5, cr * 0.65)
+      g.fillCircle(cx + cr * 0.10, cy - cr * 0.30, cr * 0.62)
+    }
+
+    g.fillStyle(0x3DAD1A, 1)
+    g.fillRect(0, GROUND_Y - 10, W, 18)
+    g.fillStyle(0x55D428, 1)
+    g.fillRect(0, GROUND_Y - 10, W, 9)
+
+    g.fillStyle(0xC87830, 1)
+    g.fillRect(0, GROUND_Y + 8, W, (H - GROUND_Y) * 0.55)
+    g.fillStyle(0x8A4E18, 1)
+    g.fillRect(0, GROUND_Y + 8 + (H - GROUND_Y) * 0.55, W, (H - GROUND_Y) * 0.45)
+
+    g.lineStyle(2, 0x000000, 0.07)
+    for (let y = GROUND_Y + 40; y < H; y += 52) {
+      g.beginPath(); g.moveTo(0, y); g.lineTo(W, y + 10); g.strokePath()
+    }
+
+    for (const [px, py, pr] of [
+      [65,210,5],[185,268,4],[315,190,6],[455,315,5],[585,235,4],
+      [705,285,5],[135,368,4],[395,415,6],[655,395,5],[755,185,4],
+    ]) {
+      g.fillStyle(0x6A6A6A, 0.5)
+      g.lineStyle(2, 0x5A3208, 0.5)
+      g.fillEllipse(px, py, pr * 2.2, pr * 1.6)
+      g.strokeEllipse(px, py, pr * 2.2, pr * 1.6)
+    }
+  }
+
+  // ── Items ────────────────────────────────────────────────────────
+  createItems(items) {
+    const map = {}
+    for (const item of items) {
+      const gfx = this.add.graphics().setPosition(item.x, item.y).setDepth(2)
+      switch (item.type) {
+        case 'gold_large': case 'gold_medium': case 'gold_small':
+          drawGold(gfx, item.radius); break
+        case 'rock_large': case 'rock_small':
+          drawRock(gfx, item.radius); break
+        case 'diamond':
+          drawDiamond(gfx, item.radius); break
+        case 'bag':
+          drawBag(gfx, item.radius); break
+      }
+      map[item.id] = { ...item, gfx, active: item.active !== false }
+    }
+    return map
+  }
+
+  createBagLabels(items) {
+    const map = {}
+    for (const item of items) {
+      if (item.type !== 'bag') continue
+      const text = this.add.text(item.x, item.y, '?', {
+        fontSize: '18px', color: '#FFD700', fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: 2,
+      }).setOrigin(0.5).setDepth(3)
+      map[item.id] = { itemId: item.id, text }
+    }
+    return map
+  }
+
+  // ── Miners ───────────────────────────────────────────────────────
+  drawMiners() {
+    const { GROUND_Y } = this
+    for (let pid = 0; pid < 3; pid++) {
+      const anchor = ANCHORS[pid]
+      const player = this.players.find(p => p.id === pid)
+      if (!player) continue
+      this._drawMiner(anchor.x, GROUND_Y, pid)
+
+      // Player name above miner
+      const nameY = GROUND_Y - 130
+      this.add.text(anchor.x, nameY, player.name, {
+        fontSize: '14px', color: NAME_COLORS[pid],
+        stroke: '#000', strokeThickness: 3,
+        fontStyle: 'bold',
+      }).setOrigin(0.5).setDepth(6)
+
+      // Arrow/crown above MY miner
+      if (pid === this.myPlayerId) {
+        this.add.text(anchor.x, nameY - 20, '▼ 你', {
+          fontSize: '13px', color: '#FFD700',
+          stroke: '#000', strokeThickness: 2,
+        }).setOrigin(0.5).setDepth(6)
+      }
+    }
+  }
+
+  _drawMiner(cx, gy, pid) {
+    const g = this.add.graphics().setDepth(4)
+    const bodyColor = [0x2255CC, 0x1144AA, 0x226622][pid]
+    const hatColor  = [0x8B3A00, 0x444444, 0x2244AA][pid]
+
+    // Platform board
+    g.lineStyle(3, 0x5C2E00, 1)
+    g.fillStyle(0x8B5C28, 1)
+    g.fillRect(cx - 40, gy - 22, 80, 14)
+    g.strokeRect(cx - 40, gy - 22, 80, 14)
+    g.fillStyle(0xAA7840, 0.6)
+    g.fillRect(cx - 38, gy - 22, 76, 6)
+
+    // Legs
+    g.fillStyle(0x1A3A80, 1)
+    g.lineStyle(2, 0x0A1A40, 1)
+    g.fillRect(cx - 13, gy - 28, 9, 16); g.strokeRect(cx - 13, gy - 28, 9, 16)
+    g.fillRect(cx + 4,  gy - 28, 9, 16); g.strokeRect(cx + 4,  gy - 28, 9, 16)
+    g.fillStyle(0x3A2200, 1)
+    g.fillEllipse(cx - 9, gy - 10, 16, 9)
+    g.fillEllipse(cx + 9, gy - 10, 16, 9)
+
+    // Body
+    g.lineStyle(3, 0x0A1A40, 1)
+    g.fillStyle(bodyColor, 1)
+    g.fillRect(cx - 17, gy - 68, 34, 44); g.strokeRect(cx - 17, gy - 68, 34, 44)
+    g.lineStyle(3, 0xEE2222, 1)
+    g.beginPath(); g.moveTo(cx - 10, gy - 68); g.lineTo(cx - 5, gy - 46); g.strokePath()
+    g.beginPath(); g.moveTo(cx + 10, gy - 68); g.lineTo(cx + 5, gy - 46); g.strokePath()
+
+    // Arms
+    g.lineStyle(2, 0x0A1A40, 1)
+    g.fillStyle(bodyColor, 1)
+    g.fillRect(cx - 27, gy - 66, 12, 26); g.strokeRect(cx - 27, gy - 66, 12, 26)
+    g.fillRect(cx + 15, gy - 66, 12, 26); g.strokeRect(cx + 15, gy - 66, 12, 26)
+    g.fillStyle(0xFFCC99, 1)
+    g.lineStyle(2, 0xCC7733, 1)
+    g.fillCircle(cx - 21, gy - 38, 7); g.strokeCircle(cx - 21, gy - 38, 7)
+    g.fillCircle(cx + 21, gy - 38, 7); g.strokeCircle(cx + 21, gy - 38, 7)
+
+    // Head
+    g.fillStyle(0xFFCC99, 1)
+    g.lineStyle(3, 0xCC7733, 1)
+    g.fillCircle(cx, gy - 80, 19); g.strokeCircle(cx, gy - 80, 19)
+    g.fillStyle(0x222222, 1)
+    g.fillCircle(cx - 7, gy - 82, 3.5); g.fillCircle(cx + 7, gy - 82, 3.5)
+    g.fillStyle(0xFFFFFF, 1)
+    g.fillCircle(cx - 6, gy - 83, 1.5); g.fillCircle(cx + 8, gy - 83, 1.5)
+    g.lineStyle(2.5, 0x884422, 1)
+    g.beginPath(); g.moveTo(cx - 6, gy - 73); g.lineTo(cx, gy - 71); g.lineTo(cx + 6, gy - 73); g.strokePath()
+
+    // Hat
+    g.lineStyle(3, 0x5C2200, 1)
+    g.fillStyle(hatColor, 1)
+    g.fillRect(cx - 25, gy - 101, 50, 10); g.strokeRect(cx - 25, gy - 101, 50, 10)
+    g.fillRect(cx - 16, gy - 122, 32, 23); g.strokeRect(cx - 16, gy - 122, 32, 23)
+    g.fillStyle(0xFFDD00, 1)
+    g.fillRect(cx - 16, gy - 103, 32, 5)
+  }
+
+  // ── UI ───────────────────────────────────────────────────────────
+  createUI() {
+    const { W } = this
+    const bar = this.add.graphics().setDepth(7)
+    bar.fillStyle(0x000000, 0.70)
+    bar.fillRect(0, 0, W, 38)
+    bar.lineStyle(2, 0xFFCC00, 0.5)
+    bar.strokeRect(0, 0, W, 38)
+
+    const sectionW = (W - 100) / 3
+    for (const p of this.players) {
+      const x = 10 + p.id * sectionW + sectionW * 0.5
+      this.add.text(x - 5, 4, p.name, {
+        fontSize: '13px', color: NAME_COLORS[p.id],
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5, 0).setDepth(8)
+
+      this.scoreTexts[p.id] = this.add.text(x - 5, 20, `$${this.scores[p.id] || 0}`, {
+        fontSize: '14px', color: '#FFE000', fontStyle: 'bold',
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5, 0).setDepth(8)
+    }
+
+    this.timerText = this.add.text(W - 8, 8, `${this.timeLeft}s`, {
+      fontSize: '20px', color: '#FF6666', fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(1, 0).setDepth(8)
+  }
+
+  // ── Hook physics (my player) ─────────────────────────────────────
+  _hookTip(hook, anchor) {
+    return {
+      tx: anchor.x + Math.sin(hook.angle) * hook.length,
+      ty: anchor.y + Math.cos(hook.angle) * hook.length,
+    }
+  }
+
+  _updateMyHook(dt) {
+    const hook = this.myHook
+    const anchor = ANCHORS[this.myPlayerId]
+
+    if (hook.state === 'SWINGING') {
+      hook.angle += SWING_SPEED * hook.dir * dt
+      if (hook.angle >=  MAX_ANGLE) { hook.angle =  MAX_ANGLE; hook.dir = -1 }
+      if (hook.angle <= -MAX_ANGLE) { hook.angle = -MAX_ANGLE; hook.dir =  1 }
+      hook.length = MIN_LENGTH
+
+    } else if (hook.state === 'EXTENDING') {
+      hook.length += EXTEND_SPEED * dt
+      const { tx, ty } = this._hookTip(hook, anchor)
+
+      // Collision check
+      for (const item of Object.values(this.itemGfxMap)) {
+        if (!item.active) continue
+        if (Math.hypot(tx - item.x, ty - item.y) < item.radius + 10) {
+          hook.state = 'GRAB_PENDING'
+          this.socket.emit('grab_item', { itemId: item.id })
+          return
+        }
+      }
+
+      if (hook.length > MAX_LENGTH || tx < 0 || tx > this.W || ty > this.H) {
+        hook.state = 'RETRACTING'
+      }
+
+    } else if (hook.state === 'RETRACTING') {
+      const hookedItem = hook.hookedItemId !== null ? this.itemGfxMap[hook.hookedItemId] : null
+      const w = hookedItem ? hookedItem.weight : 1
+      hook.length -= (RETRACT_SPEED / w) * dt
+      if (hook.length <= MIN_LENGTH) {
+        hook.length = MIN_LENGTH
+        hook.hookedItemId = null
+        hook.state = 'SWINGING'
+      }
+
+    } else if (hook.state === 'GRAB_PENDING') {
+      // Do nothing: wait for server item_grabbed event
+    }
+  }
+
+  // ── Draw hooks ───────────────────────────────────────────────────
+  _drawHook(g, pid, hook) {
+    const anchor = ANCHORS[pid]
+    const { tx, ty } = this._hookTip(hook, anchor)
+    const ang = hook.angle
+    const color = ROPE_COLORS[pid]
+
+    // Rope shadow
+    g.lineStyle(5, 0x000000, 0.12)
+    g.beginPath(); g.moveTo(anchor.x + 2, anchor.y + 2); g.lineTo(tx + 2, ty + 2); g.strokePath()
+
+    // Rope
+    g.lineStyle(3.5, color, 1)
+    g.beginPath(); g.moveTo(anchor.x, anchor.y); g.lineTo(tx, ty); g.strokePath()
+
+    // Claw
+    const px =  Math.cos(ang), py = -Math.sin(ang)
+    const fx =  Math.sin(ang), fy =  Math.cos(ang)
+    const S = 11
+
+    g.lineStyle(4, 0x666666, 1)
+    g.beginPath(); g.moveTo(tx, ty); g.lineTo(tx - px*S - fx*4, ty - py*S - fy*4); g.strokePath()
+    g.beginPath(); g.moveTo(tx, ty); g.lineTo(tx + px*S - fx*4, ty + py*S - fy*4); g.strokePath()
+
+    g.fillStyle(0xAAAAAA, 1)
+    g.lineStyle(2, 0x555555, 1)
+    g.fillCircle(tx, ty, 6)
+    g.strokeCircle(tx, ty, 6)
+  }
+
+  // ── Sync hooked item position ────────────────────────────────────
+  _syncMyItemPosition() {
+    const hook = this.myHook
+    if (hook.hookedItemId === null) return
+    const item = this.itemGfxMap[hook.hookedItemId]
+    if (!item) return
+    const anchor = ANCHORS[this.myPlayerId]
+    const { tx, ty } = this._hookTip(hook, anchor)
+    item.gfx.setPosition(tx, ty)
+    item.x = tx
+    item.y = ty
+  }
+
+  // ── Sync bag labels ──────────────────────────────────────────────
+  _syncBagLabels() {
+    for (const { itemId, text } of Object.values(this.bagLabelMap)) {
+      const item = this.itemGfxMap[itemId]
+      if (!item) continue
+      if (!item.active) { text.setVisible(false); continue }
+      text.setPosition(item.x, item.y)
+    }
+  }
+
+  // ── Send hook update to server ───────────────────────────────────
+  _sendHookUpdate() {
+    if (!this.socket) return
+    this.socket.emit('hook_update', {
+      angle: this.myHook.angle,
+      length: this.myHook.length,
+      hookState: this.myHook.state,
+    })
+  }
+
+  // ── Socket events ─────────────────────────────────────────────────
+  _setupSocketEvents() {
+    const s = this.socket
+
+    s.on('hooks_sync', ({ players }) => {
+      for (const p of players) {
+        if (p.id === this.myPlayerId) continue
+        this.remoteHooks[p.id] = { angle: p.angle, length: p.length, state: p.hookState }
+      }
+    })
+
+    s.on('item_grabbed', ({ itemId, playerId, value, score }) => {
+      // Hide item
+      const item = this.itemGfxMap[itemId]
+      if (item) {
+        item.active = false
+        item.gfx.setVisible(false)
+      }
+      // Update score
+      this.scores[playerId] = score
+      if (this.scoreTexts[playerId]) {
+        this.scoreTexts[playerId].setText(`$${score}`)
+      }
+
+      // Handle my hook state
+      if (playerId === this.myPlayerId) {
+        this.myHook.state = 'RETRACTING'
+        this.myHook.hookedItemId = itemId
+      } else if (this.myHook.state === 'GRAB_PENDING') {
+        // Another player snatched it during our pending grab
+        this.myHook.state = 'RETRACTING'
+        this.myHook.hookedItemId = null
+      }
+
+      // Floating score popup above that player's miner
+      const anchor = ANCHORS[playerId]
+      if (anchor) {
+        const sign = value >= 0 ? '+' : ''
+        const ft = this.add.text(anchor.x, anchor.y - 50, `${sign}$${value}`, {
+          fontSize: '22px',
+          color: value >= 0 ? '#FFE000' : '#FF4444',
+          fontStyle: 'bold',
+          stroke: '#000', strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(10)
+        this.tweens.add({
+          targets: ft, y: anchor.y - 100, alpha: 0, duration: 900,
+          onComplete: () => ft.destroy(),
+        })
+      }
+    })
+
+    s.on('timer_tick', ({ timeLeft }) => {
+      this.timeLeft = timeLeft
+      if (this.timerText) {
+        this.timerText.setText(`${timeLeft}s`)
+        if (timeLeft <= 10) {
+          this.timerText.setStyle({ color: '#FF2222', fontStyle: 'bold', fontSize: '22px' })
+        }
+      }
+    })
+
+    s.on('game_end', ({ scores }) => {
+      this.scene.start('MultiResultScene', {
+        scores,
+        myPlayerId: this.myPlayerId,
+      })
+    })
+
+    s.on('player_left', ({ playerId, name }) => {
+      const notice = this.add.text(this.W / 2, this.H / 2 - 40, `${name} 离开了游戏`, {
+        fontSize: '22px', color: '#FF9999',
+        stroke: '#000', strokeThickness: 4,
+        backgroundColor: '#00000088',
+        padding: { x: 16, y: 8 },
+      }).setOrigin(0.5).setDepth(20)
+      this.time.delayedCall(2500, () => notice.destroy())
+    })
+  }
+
+  // ── Input ────────────────────────────────────────────────────────
+  _onShoot() {
+    if (this.myHook.state === 'SWINGING') this.myHook.state = 'EXTENDING'
+  }
+
+  // ── Update loop ───────────────────────────────────────────────────
+  update(_time, delta) {
+    const dt = delta / 1000
+    this._updateMyHook(dt)
+
+    this.hookGfx.clear()
+
+    // Draw my hook
+    this._drawHook(this.hookGfx, this.myPlayerId, this.myHook)
+
+    // Draw remote hooks
+    for (const [pid, hook] of Object.entries(this.remoteHooks)) {
+      if (parseInt(pid) === this.myPlayerId) continue
+      this._drawHook(this.hookGfx, parseInt(pid), hook)
+    }
+
+    this._syncMyItemPosition()
+    this._syncBagLabels()
+  }
+
+  shutdown() {
+    const s = this.socket
+    if (s) {
+      s.off('hooks_sync')
+      s.off('item_grabbed')
+      s.off('timer_tick')
+      s.off('game_end')
+      s.off('player_left')
+    }
+  }
+}

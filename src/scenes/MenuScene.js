@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { connectSocket } from '../socket.js'
 
 export default class MenuScene extends Phaser.Scene {
   constructor() { super('MenuScene') }
@@ -77,12 +78,28 @@ export default class MenuScene extends Phaser.Scene {
       this.scene.start('GameScene', { level: 1 })
     })
 
+    // ── Multiplayer button ──
+    const multiBtn = this.add.rectangle(W / 2, 370, 230, 62, 0x3388CC)
+      .setInteractive({ useHandCursor: true })
+
+    this.add.text(W / 2, 370, '多人游戏', {
+      fontSize: '30px', color: '#FFFFFF', fontStyle: 'bold',
+      stroke: '#00224466', strokeThickness: 4,
+    }).setOrigin(0.5)
+
+    multiBtn.on('pointerover', () => multiBtn.setFillStyle(0x55AAEE))
+    multiBtn.on('pointerout',  () => multiBtn.setFillStyle(0x3388CC))
+    multiBtn.on('pointerdown', () => {
+      const socket = connectSocket()
+      this.scene.start('LobbyScene', { socket })
+    })
+
     // Instructions
-    this.add.text(W / 2, 366, '点击屏幕  或  按空格键  发射钩子', {
+    this.add.text(W / 2, 446, '点击屏幕  或  按空格键  发射钩子', {
       fontSize: '17px', color: '#FFFFFF',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5)
-    this.add.text(W / 2, 396, '抢在时间用完前达到目标金额！', {
+    this.add.text(W / 2, 470, '抢在时间用完前达到目标金额！', {
       fontSize: '15px', color: '#FFE000',
       stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5)

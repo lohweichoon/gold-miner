@@ -2,6 +2,9 @@ import Phaser from 'phaser'
 import MenuScene from './scenes/MenuScene.js'
 import GameScene from './scenes/GameScene.js'
 import GameOverScene from './scenes/GameOverScene.js'
+import LobbyScene from './scenes/LobbyScene.js'
+import MultiScene from './scenes/MultiScene.js'
+import MultiResultScene from './scenes/MultiResultScene.js'
 
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -18,5 +21,6 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [MenuScene, GameScene, GameOverScene],
+  dom: { createContainer: true },
+  scene: [MenuScene, GameScene, GameOverScene, LobbyScene, MultiScene, MultiResultScene],
 })
