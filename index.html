@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>黄金矿工</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -16,9 +18,42 @@
       overflow: hidden;
     }
     canvas { display: block; }
+
+    /* Portrait overlay — only on touch devices (phones/tablets) */
+    #rotate-hint {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #1a0a00;
+      color: #FFD700;
+      font-family: sans-serif;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 18px;
+      z-index: 9999;
+      text-align: center;
+      pointer-events: none;
+    }
+    @media screen and (orientation: portrait) and (hover: none) and (pointer: coarse) {
+      #rotate-hint { display: flex; }
+    }
   </style>
 </head>
 <body>
+  <!-- Rotate hint for mobile portrait mode -->
+  <div id="rotate-hint">
+    <div style="font-size:56px">📱</div>
+    <div style="font-size:26px;font-weight:bold">请旋转设备</div>
+    <div style="font-size:16px;color:#FFCC88">横屏游戏效果更佳</div>
+  </div>
+
+  <script>
+    // Try to lock landscape orientation (works on Android Chrome, ignored elsewhere)
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(() => {})
+    }
+  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>
