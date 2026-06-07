@@ -9,13 +9,16 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; background: #1a0a00; overflow: hidden; }
-    #game {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: #1a0a00;
+    /* Force the canvas to always be perfectly centred in the viewport,
+       regardless of what Phaser's autoCenter margins compute. */
+    canvas {
+      display: block !important;
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      margin: 0 !important;
     }
-    canvas { display: block; }
 
     /* Portrait overlay — only on touch devices (phones/tablets) */
     #rotate-hint {
@@ -40,8 +43,6 @@
 </head>
 <body>
   <!-- Rotate hint for mobile portrait mode -->
-  <div id="game"></div>
-
   <div id="rotate-hint">
     <div style="font-size:56px">📱</div>
     <div style="font-size:26px;font-weight:bold">请旋转设备</div>

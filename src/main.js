@@ -8,7 +8,6 @@ import MultiResultScene from './scenes/MultiResultScene.js'
 
 new Phaser.Game({
   type: Phaser.AUTO,
-  parent: 'game',
   width: 1000,
   height: 500,
   backgroundColor: '#d4a055',

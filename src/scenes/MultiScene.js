@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
 import { drawGold, drawRock, drawDiamond, drawBag } from '../draw.js'
 
-// Anchor positions per player count
+// Anchor positions per player count (for W=1000)
 const ANCHOR_SETS = {
   1: [{ x: 500, y: 108 }],
   2: [{ x: 250, y: 108 }, { x: 750, y: 108 }],
@@ -42,8 +42,9 @@ export default class MultiScene extends Phaser.Scene {
     // ── My hook local state ──
     this.myHook = {
       angle: 0, dir: 1, length: MIN_LENGTH,
-      state: 'SWINGING',   // SWINGING | EXTENDING | RETRACTING | GRAB_PENDING
+      state: 'SWINGING',   // SWINGING | EXTENDING | RETRACTING
       hookedItemId: null,
+      pendingScore: undefined,  // deferred score shown on delivery
     }
 
     // Remote hook states: { [playerId]: { angle, length, state } }
@@ -54,15 +55,15 @@ export default class MultiScene extends Phaser.Scene {
     for (const p of this.players) this.scores[p.id] = p.score
 
     // Build scene
+    this.scoreTexts = {}     // must exist before drawMiners()
     this.drawBackground()
     this.itemGfxMap  = this.createItems(this.itemDefs)
     this.bagLabelMap = this.createBagLabels(this.itemDefs)
-    this.drawMiners()
+    this.drawMiners()        // creates scoreTexts entries
 
     this.hookGfx = this.add.graphics().setDepth(5)
 
-    this.scoreTexts = {}
-    this.createUI()
+    this.createUI()          // timer only — no dark bar
 
     this._setupSocketEvents()
 
@@ -86,7 +87,8 @@ export default class MultiScene extends Phaser.Scene {
     g.fillStyle(0xFFEE33, 1); g.fillCircle(W - 55, 42, 26)
     g.fillStyle(0xFFFF88, 0.5); g.fillCircle(W - 55, 42, 36)
 
-    for (const [cx, cy, cr] of [[110,38,28],[290,22,22],[520,42,30],[690,26,20]]) {
+    // Clouds spread across the wider (1000px) sky
+    for (const [cx, cy, cr] of [[90,38,28],[280,22,22],[490,42,30],[680,26,20],[850,36,24]]) {
       g.fillStyle(0xFFFFFF, 1)
       g.fillCircle(cx, cy, cr); g.fillCircle(cx+cr*0.55, cy+4, cr*0.72)
       g.fillCircle(cx-cr*0.50, cy+5, cr*0.65); g.fillCircle(cx+cr*0.10, cy-cr*0.30, cr*0.62)
@@ -102,9 +104,11 @@ export default class MultiScene extends Phaser.Scene {
       g.beginPath(); g.moveTo(0, y); g.lineTo(W, y + 10); g.strokePath()
     }
 
+    // Decorative pebbles spread across wider canvas
     for (const [px, py, pr] of [
       [65,210,5],[185,268,4],[315,190,6],[455,315,5],[585,235,4],
       [705,285,5],[135,368,4],[395,415,6],[655,395,5],[755,185,4],
+      [820,250,5],[900,310,4],[940,190,6],[870,400,5],[980,360,4],
     ]) {
       g.fillStyle(0x6A6A6A, 0.5); g.lineStyle(2, 0x5A3208, 0.5)
       g.fillEllipse(px, py, pr*2.2, pr*1.6); g.strokeEllipse(px, py, pr*2.2, pr*1.6)
@@ -148,17 +152,21 @@ export default class MultiScene extends Phaser.Scene {
       if (!anchor) continue
       this._drawMiner(anchor.x, GROUND_Y, player.id)
 
-      const nameY = GROUND_Y - 130
-      this.add.text(anchor.x, nameY, player.name, {
-        fontSize: '14px', color: NAME_COLORS[player.id],
-        stroke: '#000', strokeThickness: 3, fontStyle: 'bold',
-      }).setOrigin(0.5).setDepth(6)
+      const isMe   = player.id === this.myPlayerId
+      const nameColor  = NAME_COLORS[player.id]
+      const scoreColor = isMe ? '#FFE000' : '#DDDDDD'
 
-      if (player.id === this.myPlayerId) {
-        this.add.text(anchor.x, nameY - 20, '▼ 你', {
-          fontSize: '13px', color: '#FFD700', stroke: '#000', strokeThickness: 2,
-        }).setOrigin(0.5).setDepth(6)
-      }
+      // Player name — top of canvas, above the miner's hat (hat top ≈ y=23)
+      this.add.text(anchor.x, 3, `${isMe ? '▶ ' : ''}${player.name}`, {
+        fontSize: '11px', color: nameColor, fontStyle: 'bold',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5, 0).setDepth(7)
+
+      // Score text — dynamic, shown on delivery
+      this.scoreTexts[player.id] = this.add.text(anchor.x, 16, `$${this.scores[player.id] || 0}`, {
+        fontSize: '14px', color: scoreColor, fontStyle: 'bold',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5, 0).setDepth(7)
     }
   }
 
@@ -205,26 +213,11 @@ export default class MultiScene extends Phaser.Scene {
     g.fillStyle(0xFFDD00, 1); g.fillRect(cx-16, gy-103, 32, 5)
   }
 
-  // ── UI (top scoreboard) ──────────────────────────────────────────
+  // ── UI (timer only — scores are above each miner) ────────────────
   createUI() {
     const { W } = this
-    const bar = this.add.graphics().setDepth(7)
-    bar.fillStyle(0x000000, 0.70); bar.fillRect(0, 0, W, 38)
-    bar.lineStyle(2, 0xFFCC00, 0.5); bar.strokeRect(0, 0, W, 38)
-
-    const sectionW = (W - 100) / 3
-    for (const p of this.players) {
-      const x = 10 + p.id * sectionW + sectionW * 0.5
-      this.add.text(x - 5, 4, p.name, {
-        fontSize: '13px', color: NAME_COLORS[p.id], stroke: '#000', strokeThickness: 2,
-      }).setOrigin(0.5, 0).setDepth(8)
-      this.scoreTexts[p.id] = this.add.text(x - 5, 20, `$${this.scores[p.id] || 0}`, {
-        fontSize: '14px', color: '#FFE000', fontStyle: 'bold', stroke: '#000', strokeThickness: 2,
-      }).setOrigin(0.5, 0).setDepth(8)
-    }
-
-    this.timerText = this.add.text(W - 8, 8, `${this.timeLeft}s`, {
-      fontSize: '20px', color: '#FF6666', fontStyle: 'bold', stroke: '#000', strokeThickness: 3,
+    this.timerText = this.add.text(W - 8, 5, `${this.timeLeft}s`, {
+      fontSize: '20px', color: '#FF4444', fontStyle: 'bold', stroke: '#000', strokeThickness: 3,
     }).setOrigin(1, 0).setDepth(8)
   }
 
@@ -253,7 +246,10 @@ export default class MultiScene extends Phaser.Scene {
       for (const item of Object.values(this.itemGfxMap)) {
         if (!item.active) continue
         if (Math.hypot(tx - item.x, ty - item.y) < item.radius + 10) {
-          hook.state = 'GRAB_PENDING'
+          // Immediately retract — no GRAB_PENDING pause (client-side prediction)
+          hook.state = 'RETRACTING'
+          hook.hookedItemId = item.id
+          item.draggedByPlayerId = this.myPlayerId
           this.socket.emit('grab_item', { itemId: item.id })
           return
         }
@@ -270,17 +266,24 @@ export default class MultiScene extends Phaser.Scene {
 
       if (hook.length <= MIN_LENGTH) {
         hook.length = MIN_LENGTH
-        // Item reaches the miner — now hide it
+        // Item reaches the miner — hide it
         if (hook.hookedItemId !== null) {
           const item = this.itemGfxMap[hook.hookedItemId]
           if (item) { item.gfx.setVisible(false); item.draggedByPlayerId = null }
+          hook.hookedItemId = null
+
+          // Apply deferred score now that item is delivered
+          if (hook.pendingScore !== undefined) {
+            const myId = this.myPlayerId
+            this.scores[myId] = hook.pendingScore
+            if (this.scoreTexts[myId]) {
+              this.scoreTexts[myId].setText(`$${hook.pendingScore}`)
+            }
+            hook.pendingScore = undefined
+          }
         }
-        hook.hookedItemId = null
         hook.state = 'SWINGING'
       }
-
-    } else if (hook.state === 'GRAB_PENDING') {
-      // Waiting for server to confirm grab — hold position
     }
   }
 
@@ -352,7 +355,6 @@ export default class MultiScene extends Phaser.Scene {
     for (const { itemId, text } of Object.values(this.bagLabelMap)) {
       const item = this.itemGfxMap[itemId]
       if (!item) continue
-      // Hide label once grabbed (active=false); item gfx itself still moves
       if (!item.active) { text.setVisible(false); continue }
       text.setPosition(item.x, item.y)
     }
@@ -383,27 +385,26 @@ export default class MultiScene extends Phaser.Scene {
       const item = this.itemGfxMap[itemId]
       if (item) {
         item.active = false
-        // Keep item VISIBLE — it will follow the hook and disappear when hook returns
         item.draggedByPlayerId = playerId
       }
 
-      // Update scoreboard
-      this.scores[playerId] = score
-      if (this.scoreTexts[playerId]) {
-        this.scoreTexts[playerId].setText(`$${score}`)
-      }
-
-      // Resolve my hook state
       if (playerId === this.myPlayerId) {
-        this.myHook.state = 'RETRACTING'
-        this.myHook.hookedItemId = itemId
-      } else if (this.myHook.state === 'GRAB_PENDING') {
-        // Race condition: someone else got it first
-        this.myHook.state = 'RETRACTING'
-        this.myHook.hookedItemId = null
+        // Server confirmed we got it — defer score display until item is delivered
+        this.myHook.pendingScore = score
+      } else {
+        // Someone else got it
+        if (this.myHook.hookedItemId === itemId) {
+          // We optimistically grabbed it — un-hook, keep retracting empty
+          this.myHook.hookedItemId = null
+        }
+        // Update remote player's score immediately
+        this.scores[playerId] = score
+        if (this.scoreTexts[playerId]) {
+          this.scoreTexts[playerId].setText(`$${score}`)
+        }
       }
 
-      // Floating score popup above that player's miner
+      // Floating score popup above that player's anchor
       const anchor = this.ANCHORS[playerId]
       if (anchor) {
         const sign = value >= 0 ? '+' : ''
